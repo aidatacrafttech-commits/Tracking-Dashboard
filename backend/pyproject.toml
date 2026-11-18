@@ -8,7 +8,9 @@ requires-python = ">=3.12,<3.13"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["venv", ".venv"]
+# app_video_layout.py and app_course_catalog.py are copies of AdhyaapakAI backend modules: kept
+# unchanged so they can be re-copied when the app changes them.
+extend-exclude = ["venv", ".venv", "app/services/app_video_layout.py", "app/services/app_course_catalog.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "DTZ"]

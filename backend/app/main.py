@@ -30,9 +30,8 @@ from app.notifications.smtp import SmtpSender
 from app.ops.service import OperationsService
 from app.ops.storage import permission_findings
 from app.providers.registry import ProviderRuntime, build_runtimes
-from app.services.app_users import build_app_users_source
-from app.services.course_storage import build_course_storage
 from app.services.health import ReadinessService
+from app.services.placement_paper import MAX_PDF_BYTES, XLSX_MAX_BYTES
 from app.services.polling import PollingCoordinator, PollingScheduler
 from app.services.presence import PresenceTracker
 
@@ -106,8 +105,6 @@ def create_app(
             await scheduler.stop()
         await app.state.coordinator.aclose()
         engine.dispose()
-        if app.state.app_users_source is not None:
-            app.state.app_users_source.close()
         logger.info("application stopped")
 
     app = FastAPI(
@@ -132,10 +129,8 @@ def create_app(
     app.state.shutting_down = asyncio.Event()
     app.state.scheduler = None
     app.state.attempt_limiter = AttemptLimiter(app.state.session_factory, settings)
-    # Course files (S3). None = not configured: uploads are refused, video URLs still work.
-    app.state.course_storage = build_course_storage(settings)
-    # App Users (AdhyaapakAI MongoDB, read-only). None = not configured; connects lazily.
-    app.state.app_users_source = build_app_users_source(settings)
+    # The app's database and storage are reached only through the AdhyaapakAI backend's admin
+    # API, from the browser (Course Management, Placement Drives, App Users).
     # Who has the mobile app open right now (heartbeats; in memory, one worker).
     app.state.presence = PresenceTracker()
     app.state.smtp_sender = smtp_sender or SmtpSender(settings)
@@ -153,7 +148,16 @@ def create_app(
             allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"],
             expose_headers=["X-Request-ID"],
         )
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_bytes)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=settings.max_request_bytes,
+        # A question paper as a PDF (10 MB).
+        path_limits=(
+            ("/api/v1/placement-drives/parse-pdf", MAX_PDF_BYTES + 65_536),
+            # A results table (from the app's admin API) to turn into an Excel file.
+            ("/api/v1/placement-drives/xlsx", XLSX_MAX_BYTES),
+        ),
+    )
     # Unknown Host headers are refused (defence against DNS rebinding).
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     # Added last so it is outermost: request ids cover CORS and error responses too.

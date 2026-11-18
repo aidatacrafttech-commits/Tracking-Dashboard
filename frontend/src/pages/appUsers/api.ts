@@ -1,8 +1,15 @@
 import { apiFetch } from "../../api/client";
+import { useAppSettings } from "../../api/hooks";
+import { useAuth } from "../../auth/AuthContext";
+import { adminFetch } from "../vouchers/adminApi";
 
-// Read-only counts from the AdhyaapakAI database. The dashboard server holds the database
-// URL; the browser gets counts, and per-day signup lists (masked for viewers). Money is in paise.
-export const APP_USERS_API = "/app-users";
+// Read-only counts from the AdhyaapakAI backend's admin API (/admin/users, x-admin-secret
+// typed into this tab, like Voucher Management); the dashboard has no database keys for it.
+// Lists are masked for the dashboard's viewers. Days follow the dashboard's display timezone.
+// Only "app open" (the app's heartbeats to this dashboard) comes from the dashboard's server.
+// Money is in paise.
+export const AU_API = "/admin/users";
+export const APP_USERS_API = "/app-users"; // the dashboard's own server: presence only
 export const KEY = ["app-users"] as const;
 export const RANGES = [7, 30, 90] as const;
 export const MAX_RANGE_DAYS = 90;
@@ -87,11 +94,25 @@ export interface SignupList {
   signups: SignupRow[];
 }
 
-export const fetchStatus = () => apiFetch<AppUsersStatus>(`${APP_USERS_API}/status`);
-export const fetchSummary = (sel: Selection) =>
-  apiFetch<AppUsersSummary>(`${APP_USERS_API}/summary?${"days" in sel ? `days=${sel.days}` : `start=${sel.start}&end=${sel.end}`}`);
-export const fetchSignups = (start: string, end: string) =>
-  apiFetch<SignupList>(`${APP_USERS_API}/signups?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+/** What every call needs: the display timezone (null while the settings load) and whether
+ * lists come masked (the dashboard's read-only viewers). */
+export interface UsersView {
+  tz: string | null;
+  masked: boolean;
+}
+
+export function useUsersView(): UsersView {
+  const settings = useAppSettings();
+  const { canWrite } = useAuth();
+  const tz = settings.data?.display_timezone ?? (settings.isPending ? null : "Asia/Kolkata");
+  return { tz, masked: !canWrite };
+}
+
+export const fetchStatus = () => adminFetch<AppUsersStatus>(`${AU_API}/status`);
+export const fetchSummary = (sel: Selection, tz: string) =>
+  adminFetch<AppUsersSummary>(`${AU_API}/summary`, { query: { ...sel, tz } });
+export const fetchSignups = (start: string, end: string, view: UsersView) =>
+  adminFetch<SignupList>(`${AU_API}/signups`, { query: { start, end, tz: view.tz ?? undefined, masked: view.masked || undefined } });
 export interface DeletionItem {
   requested_at: string | null;
   status: string | null; // scheduled, reactivated, in_progress or completed
@@ -114,8 +135,8 @@ export interface DeletionList {
   deletions: DeletionItem[];
 }
 
-export const fetchDeletions = (start: string, end: string) =>
-  apiFetch<DeletionList>(`${APP_USERS_API}/deletions?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+export const fetchDeletions = (start: string, end: string, view: UsersView) =>
+  adminFetch<DeletionList>(`${AU_API}/deletions`, { query: { start, end, tz: view.tz ?? undefined, masked: view.masked || undefined } });
 export interface LiveNow {
   online_now: number; // distinct users in any signal below
   app_open: number | null; // app heartbeats; null until the app sends them
@@ -128,7 +149,17 @@ export interface LiveNow {
   checked_at: string;
 }
 
-export const fetchLive = () => apiFetch<LiveNow>(`${APP_USERS_API}/live`);
+/** Online now from the admin API, plus "app open" from the app's heartbeats to this
+ * dashboard. The two can't be matched person by person any more (the dashboard has no
+ * database), so "online now" is the larger of the two counts. */
+export async function fetchLive(): Promise<LiveNow> {
+  const [live, presence] = await Promise.all([
+    adminFetch<LiveNow>(`${AU_API}/live`),
+    apiFetch<{ app_open: number | null }>(`${APP_USERS_API}/presence`).catch(() => ({ app_open: null })),
+  ]);
+  const appOpen = presence.app_open;
+  return { ...live, app_open: appOpen, online_now: appOpen === null ? live.online_now : Math.max(live.online_now, appOpen) };
+}
 
 /** Today's calendar date (YYYY-MM-DD) in a timezone. */
 export const todayIn = (timeZone: string) => new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());

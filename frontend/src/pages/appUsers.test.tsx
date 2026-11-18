@@ -1,14 +1,18 @@
-// App Users page against the dashboard's own API (mocked with MSW). The browser never talks
-// to the app database and only ever receives counts and server-masked rows.
+// App Users page (mocked with MSW). Counts and lists come from the AdhyaapakAI backend's admin
+// API (/api/admin/users, x-admin-secret), like Voucher Management; lists are masked by that
+// server for the dashboard's viewers. Only "app open" comes from the dashboard's own server.
 
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../test/a11y";
 import { renderApp } from "../test/render";
 import { requests, server } from "../test/server";
+import { adminSecret } from "./vouchers/adminApi";
 
-const A = "*/api/v1/app-users";
+const SECRET = "test-admin-secret";
+const A = "*/api/admin/users"; // the app's admin API
+const D = "*/api/v1/app-users"; // the dashboard's own server: presence only
 const day = (date: string, signups: number, deleted_since = 0) => ({ date, signups, deleted_since, purchases: 0, vouchers: 0, revenue_paise: 0 });
 const SUMMARY = {
   timezone: "Asia/Kolkata",
@@ -47,7 +51,9 @@ const TODAY = {
   ],
 };
 const LIVE_NOW = { online_now: 4, app_open: null, using_app: 3, watching_video: 2, in_live_tutor: 1, asking_doubts: 0, taking_test: 0, online_window_minutes: 12, checked_at: "2026-11-03T09:30:00Z" };
-const called = (path: string) => requests.some((r) => r.url.pathname.startsWith(`/api/v1/app-users/${path}`));
+const called = (path: string) => requests.some((r) => r.url.pathname.startsWith(`/api/admin/users/${path}`));
+
+beforeEach(() => adminSecret.set(SECRET));
 
 function useApi(summary: object = SUMMARY, today: object = TODAY) {
   server.use(
@@ -55,6 +61,7 @@ function useApi(summary: object = SUMMARY, today: object = TODAY) {
     http.get(`${A}/summary`, () => HttpResponse.json(summary)),
     http.get(`${A}/signups`, () => HttpResponse.json(today)),
     http.get(`${A}/live`, () => HttpResponse.json(LIVE_NOW)),
+    http.get(`${D}/presence`, () => HttpResponse.json({ app_open: null })),
   );
 }
 
@@ -105,7 +112,7 @@ describe("app users", () => {
     await screen.findByRole("region", { name: "New signups today" });
     await user.selectOptions(screen.getByLabelText("Range"), "90");
     await waitFor(() =>
-      expect(requests.some((r) => r.url.pathname === "/api/v1/app-users/summary" && r.url.searchParams.get("days") === "90")).toBe(true));
+      expect(requests.some((r) => r.url.pathname === "/api/admin/users/summary" && r.url.searchParams.get("days") === "90")).toBe(true));
   });
 
   it("asks for a custom date range only once both dates are valid", async () => {
@@ -122,7 +129,7 @@ describe("app users", () => {
     await user.clear(screen.getByLabelText("From"));
     await user.type(screen.getByLabelText("From"), "2026-10-10");
     await waitFor(() =>
-      expect(requests.some((r) => r.url.pathname === "/api/v1/app-users/summary"
+      expect(requests.some((r) => r.url.pathname === "/api/admin/users/summary"
         && r.url.searchParams.get("start") === "2026-10-10" && r.url.searchParams.get("end") === "2026-10-20")).toBe(true));
   });
 
@@ -190,7 +197,7 @@ describe("app users", () => {
     await user.type(screen.getByLabelText("Search name, email or phone"), "neha");
     expect(within(table).queryByText("Details removed")).not.toBeInTheDocument();
     expect(screen.getByTestId("people-count")).toHaveTextContent("1 of 2 shown");
-    expect(requests.some((r) => r.url.pathname === "/api/v1/app-users/deletions")).toBe(true);
+    expect(requests.some((r) => r.url.pathname === "/api/admin/users/deletions")).toBe(true);
   });
 
   it("shows a setup notice and never requests data when the server is not configured", async () => {
@@ -200,13 +207,60 @@ describe("app users", () => {
     expect(called("summary") || called("signups")).toBe(false);
   });
 
-  it("shows Not authorised when the database refuses the dashboard's login", async () => {
+  it("shows Not authorised when the database refuses the app backend's login", async () => {
     useApi();
-    server.use(http.get(`${A}/summary`, () =>
-      HttpResponse.json({ error: { code: "app_users_forbidden", message: "refused", request_id: "r" } }, { status: 502 })));
+    server.use(http.get(`${A}/summary`, () => HttpResponse.json({ detail: "refused", code: "app_users_forbidden" }, { status: 502 })));
     renderApp("/app-users");
     expect(await screen.findByText("Not authorised.")).toBeInTheDocument();
-    expect(screen.getByText("ADHYAAPAK_MONGO_URL")).toBeInTheDocument();
+    expect(screen.getByText("MONGO_URL")).toBeInTheDocument();
+  });
+
+  it("asks for the admin secret first and sends it as x-admin-secret", async () => {
+    useApi();
+    adminSecret.clear();
+    const seen: (string | null)[] = [];
+    server.use(http.get(`${A}/status`, ({ request }) => {
+      seen.push(request.headers.get("x-admin-secret"));
+      return request.headers.get("x-admin-secret") === SECRET
+        ? HttpResponse.json({ configured: true, database: "doubt_solver_app" })
+        : HttpResponse.json({ detail: "Forbidden" }, { status: 403 });
+    }));
+    const { user } = renderApp("/app-users");
+    expect(await screen.findByRole("heading", { name: "Unlock App Users" }, { timeout: 5000 })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Admin secret"), SECRET);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("region", { name: "New signups today" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(seen).toContain(SECRET);
+    // Nothing reads the app's database through the dashboard's own server.
+    const own = requests.filter((r) => r.url.pathname.startsWith("/api/v1/app-users/")).map((r) => r.url.pathname);
+    expect(own.every((path) => path === "/api/v1/app-users/presence")).toBe(true);
+  });
+
+  it("sends the display timezone, and asks for masked lists for a viewer", async () => {
+    useApi();
+    renderApp("/app-users", "viewer");
+    await screen.findByRole("table", { name: "Today's signups" }, { timeout: 5000 });
+    const summary = requests.find((r) => r.url.pathname === "/api/admin/users/summary")!;
+    expect(summary.url.searchParams.get("tz")).toBe("UTC"); // the dashboard's setting
+    const list = requests.find((r) => r.url.pathname === "/api/admin/users/signups")!;
+    expect(list.url.searchParams.get("masked")).toBe("true");
+    expect(list.url.searchParams.get("tz")).toBe("UTC");
+  });
+
+  it("asks the owner's lists unmasked", async () => {
+    useApi();
+    renderApp("/app-users");
+    await screen.findByRole("table", { name: "Today's signups" }, { timeout: 5000 });
+    const list = requests.find((r) => r.url.pathname === "/api/admin/users/signups")!;
+    expect(list.url.searchParams.has("masked")).toBe(false);
+  });
+
+  it("shows app heartbeats from the dashboard in Online now", async () => {
+    useApi();
+    server.use(http.get(`${D}/presence`, () => HttpResponse.json({ app_open: 6 })));
+    renderApp("/app-users");
+    const online = await screen.findByRole("region", { name: "Online now" }, { timeout: 5000 });
+    expect(await within(online).findByText("6")).toBeInTheDocument(); // more than the admin API's 4
   });
 
   it("shows an empty state when no one has signed up today", async () => {

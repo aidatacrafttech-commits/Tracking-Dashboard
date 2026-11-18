@@ -1,8 +1,39 @@
 # App Users
 
+> **Since 2026-11-18** the dashboard has no keys to the app's database or storage: everything below runs in the AdhyaapakAI backend's admin API (`/api/admin/...`, `x-admin-secret`) and its settings are that backend's `.env`. The dashboard's own audit log no longer records these changes (the backend logs them). Where older wording below says "the dashboard" reads or writes the database, read "the admin API".
+
 Read-only analytics over the AdhyaapakAI app's users: new signups per day (any range up to 90
 days), the signups of any day or date range with their contact details, activity, course purchases
 and deletions (nav: **App Users**, route `/app-users`).
+
+## Through the AdhyaapakAI backend's admin API (since 2026-11-18)
+
+The dashboard no longer reads the app's database for this screen. Like **Voucher
+Management**, it opens behind **Unlock App Users** (the backend's `ADMIN_SECRET`, typed into
+the tab, kept only in `sessionStorage`) and calls the AdhyaapakAI backend's
+`routes/admin_users.py`, `/api/admin/users/...`, with `x-admin-secret`:
+
+- `status`, `summary?days=|start&end`, `signups?date=|start&end`, `deletions?...`, `live`.
+  Each takes `tz` (the dashboard's display timezone, sent by the screen; default IST) and the
+  lists take `masked=true`, which the screen sends for the dashboard's read-only viewers.
+- The queries and safeguards below (read-only, allow-listed collections, time limits, one
+  minute cache, no personal data in logs) are the app's `services/admin_users.py`, moved there
+  with their tests (`tests/test_admin_users.py`); it reads the app's own `MONGO_URL`/`DB_NAME`.
+- **Who can see it:** anyone with the admin secret. A dashboard viewer now needs the secret
+  too (before, viewers saw masked lists without it); with it, the screen still asks for masked
+  lists for viewers.
+- **App open** (the app's heartbeats, `PRESENCE_URL`) still comes to the dashboard
+  (`GET /api/v1/app-users/presence`, a count only, no database). Without the database the
+  dashboard can't match those people against the admin API's signals one by one, so **Online
+  now** shows the larger of the two counts (before: everyone in either, counted once). Only
+  matters when presence is on (`ADHYAAPAK_JWT_SECRET` set; it isn't in the local `.env`).
+- Live needs the app backend with `routes/admin_users.py` deployed and the reverse proxy
+  forwarding `/api/admin/` to it.
+- Checked on 2026-11-18 against the local test database: summaries (7, 30, 90 days), the
+  90-day signup and deletion lists, full and masked, are the same as the earlier direct path.
+
+The earlier direct path and the dashboard's database keys were removed on 2026-11-18. The
+sections below describe the queries, which now run in the admin API.
 
 ## What a "signup" is
 
@@ -21,7 +52,7 @@ land on different days.
 browser ──(session cookie)──▶ dashboard backend /api/v1/app-users/*
                                   │  find / count_documents only, maxTimeMS 10 s
                                   ▼
-                             MongoDB (ADHYAAPAK_MONGO_URL, database ADHYAAPAK_MONGO_DB)
+                             MongoDB (the AdhyaapakAI backend's MONGO_URL, database DB_NAME)
 ```
 
 - The URL lives only in `backend/.env`. It is a `SecretStr`, and both the URL and its
@@ -42,7 +73,7 @@ browser ──(session cookie)──▶ dashboard backend /api/v1/app-users/*
 
 **Use a read-only database user.** In Atlas, go to Database Access → Add New Database User,
 choose built-in role **read** on database `doubt_solver_app`, and put that user's URL in
-`ADHYAAPAK_MONGO_URL`. Add the dashboard server's outbound IP to the Atlas **IP Access
+the AdhyaapakAI backend's `MONGO_URL`. Add the dashboard server's outbound IP to the Atlas **IP Access
 List**; Atlas needs outbound TCP 27017 plus DNS SRV lookups.
 
 ## Online now (live)
@@ -97,8 +128,8 @@ Until then, Online now uses the signals in the table above.
 
 | Variable | Value |
 | --- | --- |
-| `ADHYAAPAK_MONGO_URL` | `mongodb+srv://<read-only user>:<password>@cluster0.xxxxx.mongodb.net/?appName=Cluster0` |
-| `ADHYAAPAK_MONGO_DB` | `doubt_solver_app` |
+| the AdhyaapakAI backend's `MONGO_URL` | `mongodb+srv://<read-only user>:<password>@cluster0.xxxxx.mongodb.net/?appName=Cluster0` |
+| its `DB_NAME` | `doubt_solver_app` |
 | `ADHYAAPAK_JWT_SECRET` | The AdhyaapakAI backend's `JWT_SECRET`, used to verify the app's heartbeats (optional) |
 
 Both empty: the page shows "App users are not configured". Only one set: the dashboard
@@ -108,12 +139,12 @@ refuses to start, with a clear message. A rejected login: the page shows "Not au
 
 | Method | Path | Returns |
 | --- | --- | --- |
-| GET | `/api/v1/app-users/live` | `{online_now, app_open, using_app, watching_video, in_live_tutor, asking_doubts, taking_test, online_window_minutes, checked_at}`. `app_open` is `null` while `ADHYAAPAK_JWT_SECRET` is unset. |
+| GET | `/api/admin/users/live` | `{online_now, app_open, using_app, watching_video, in_live_tutor, asking_doubts, taking_test, online_window_minutes, checked_at}`. `app_open` is `null` while `ADHYAAPAK_JWT_SECRET` is unset. |
 | POST | `/api/v1/integrations/presence/heartbeat` | **The mobile app only**, with its login token as the bearer: `{"state": "active" \| "background"}` → 204. 401 for a missing, forged or expired token, or while presence is off. |
-| GET | `/api/v1/app-users/status` | `{configured, database}`; never contacts MongoDB |
-| GET | `/api/v1/app-users/summary?days=30` or `?start=YYYY-MM-DD&end=YYYY-MM-DD` | Today block (always today), totals, `daily[]`, breakdowns for the selected days. `days` is 7–90; a custom range is at most 90 days and can't end in the future. |
-| GET | `/api/v1/app-users/deletions?start=YYYY-MM-DD&end=YYYY-MM-DD` (or `?date=`) | Deletion requests made in those days (dated by the request, or by the start of an immediate purge), newest first: status, due / completed / restored time, signup date, and name, email and phone **while the profile still exists**. Same masking and range rules as signups. |
-| GET | `/api/v1/app-users/signups?start=YYYY-MM-DD&end=YYYY-MM-DD` (or `?date=` for one day) | Signups in those days (default today), newest first, at most 2,000 (`more: true` if there are more). Same range rules as the summary. Full contact details for the owner; `masked: true` for viewers. |
+| GET | `/api/admin/users/status` | `{configured, database}`; never contacts MongoDB |
+| GET | `/api/admin/users/summary?days=30` or `?start=YYYY-MM-DD&end=YYYY-MM-DD` | Today block (always today), totals, `daily[]`, breakdowns for the selected days. `days` is 7–90; a custom range is at most 90 days and can't end in the future. |
+| GET | `/api/admin/users/deletions?start=YYYY-MM-DD&end=YYYY-MM-DD` (or `?date=`) | Deletion requests made in those days (dated by the request, or by the start of an immediate purge), newest first: status, due / completed / restored time, signup date, and name, email and phone **while the profile still exists**. Same masking and range rules as signups. |
+| GET | `/api/admin/users/signups?start=YYYY-MM-DD&end=YYYY-MM-DD` (or `?date=` for one day) | Signups in those days (default today), newest first, at most 2,000 (`more: true` if there are more). Same range rules as the summary. Full contact details for the owner; `masked: true` for viewers. |
 
 **Errors**
 

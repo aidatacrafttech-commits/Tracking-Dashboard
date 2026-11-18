@@ -22,9 +22,8 @@ from app.services.presence import PresenceTracker, verify_app_token
 from tests.conftest import OWNER_TOKEN, VIEWER_TOKEN, make_settings
 
 SECRET = "adhyaapak-jwt-secret-for-tests-only"
-URL = "mongodb+srv://reader:pw-for-tests@cluster0.example.mongodb.net/"
 HB = "/api/v1/integrations/presence/heartbeat"
-LIVE = "/api/v1/app-users/live"
+PRESENCE = "/api/v1/app-users/presence"
 USER = "65a1b2c3d4e5f60718293a4b"
 OTHER = "65a1b2c3d4e5f60718293a4c"
 
@@ -51,29 +50,11 @@ def app_auth(tok: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {tok}"}
 
 
-class NoMongo:
-    """The App Users source: counts only (the presence number comes from heartbeats)."""
-
-    def live_user_ids(self, now: datetime) -> dict[str, set[str]]:
-        return {"app": {USER, "65a1b2c3d4e5f60718293a99"}, "tutor": {"65a1b2c3d4e5f60718293a99"}}
-
-    def close(self) -> None:
-        pass
-
-
 @pytest.fixture
 def papp(db_path: Path) -> Iterator[FastAPI]:
     application = create_app(
-        make_settings(
-            db_path,
-            adhyaapak_jwt_secret=SecretStr(SECRET),
-            adhyaapak_mongo_url=SecretStr(URL),
-            adhyaapak_mongo_db="doubt_solver_app",
-        ),
-        start_scheduler=False,
+        make_settings(db_path, adhyaapak_jwt_secret=SecretStr(SECRET)), start_scheduler=False
     )
-    application.state.app_users_source.close()
-    application.state.app_users_source = NoMongo()
     yield application
     application.state.engine.dispose()
 
@@ -85,7 +66,8 @@ def api(papp: FastAPI) -> Iterator[TestClient]:
 
 
 def live(api: TestClient) -> dict[str, object]:
-    return api.get(LIVE, headers={"Authorization": f"Bearer {VIEWER_TOKEN}"}).json()
+    """The app-open count the App Users screen adds to the admin API's Online now."""
+    return api.get(PRESENCE, headers={"Authorization": f"Bearer {VIEWER_TOKEN}"}).json()
 
 
 def test_open_apps_are_counted_and_leave_at_once(api: TestClient) -> None:
@@ -93,9 +75,7 @@ def test_open_apps_are_counted_and_leave_at_once(api: TestClient) -> None:
     assert api.post(HB, json={"state": "active"}, headers=app_auth(token())).status_code == 204
     api.post(HB, json={"state": "active"}, headers=app_auth(token()))  # same user twice
     api.post(HB, json={}, headers=app_auth(token(OTHER)))  # "active" is the default
-    body = live(api)
-    # USER is in both the heartbeats and the app signal: counted once.
-    assert (body["app_open"], body["online_now"], body["in_live_tutor"]) == (2, 3, 1)
+    assert live(api)["app_open"] == 2
     assert api.post(HB, json={"state": "background"}, headers=app_auth(token())).status_code == 204
     assert live(api)["app_open"] == 1
 
@@ -134,18 +114,6 @@ def test_not_configured(db_path: Path) -> None:
     application.state.engine.dispose()
 
 
-def test_live_shows_no_heartbeat_count_without_the_secret(db_path: Path) -> None:
-    application = create_app(
-        make_settings(db_path, adhyaapak_mongo_url=SecretStr(URL), adhyaapak_mongo_db="db"),
-        start_scheduler=False,
-    )
-    application.state.app_users_source.close()
-    application.state.app_users_source = NoMongo()
-    with TestClient(application) as c:
-        assert live(c)["app_open"] is None
-    application.state.engine.dispose()
-
-
 def test_the_token_is_never_logged_and_heartbeats_stay_out_of_info(
     api: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -175,3 +143,23 @@ def test_verify_app_token() -> None:
         verify_app_token(token(), "wrong", now)
     with pytest.raises(AuthenticationError):
         verify_app_token(token(exp=now + timedelta(seconds=5)), SECRET, now + timedelta(seconds=6))
+
+
+def test_the_app_open_count_alone_for_the_admin_api_screen(api: TestClient) -> None:
+    # The App Users screen reads its counts from the AdhyaapakAI backend's admin API; only the
+    # heartbeat count (kept here) comes from the dashboard, with no database read.
+    viewer = {"Authorization": f"Bearer {VIEWER_TOKEN}"}
+    assert api.get("/api/v1/app-users/presence", headers=viewer).json() == {"app_open": 0}
+    api.post(HB, json={"state": "active"}, headers=app_auth(token()))
+    assert api.get("/api/v1/app-users/presence", headers=viewer).json() == {"app_open": 1}
+    assert api.get("/api/v1/app-users/presence").status_code == 401
+
+
+def test_the_app_open_count_is_null_when_presence_is_off(db_path: Path) -> None:
+    application = create_app(make_settings(db_path), start_scheduler=False)
+    with TestClient(application) as c:
+        resp = c.get(
+            "/api/v1/app-users/presence", headers={"Authorization": f"Bearer {VIEWER_TOKEN}"}
+        )
+        assert resp.json() == {"app_open": None}
+    application.state.engine.dispose()

@@ -35,8 +35,8 @@ UI_CSP = (
 
 
 def ui_csp(asset_origin: str | None = None) -> str:
-    """The UI policy, plus the course-asset bucket (if configured) for direct uploads,
-    image previews and video/audio playback through short-lived signed URLs."""
+    """The UI policy, plus the app's bucket (if configured) for App videos and course-banner
+    uploads, image previews and video playback through short-lived signed URLs."""
     if not asset_origin:
         return UI_CSP
     return (
@@ -120,24 +120,38 @@ class RequestContextMiddleware:
 
 
 class BodySizeLimitMiddleware:
-    """Rejects request bodies above ``max_bytes`` (declared or streamed) with 413."""
+    """Rejects request bodies above ``max_bytes`` (declared or streamed) with 413.
 
-    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+    ``path_limits`` raises the limit for a few paths, by prefix (a PDF upload, a long
+    question paper); everything else keeps ``max_bytes``."""
+
+    def __init__(
+        self, app: ASGIApp, max_bytes: int, path_limits: tuple[tuple[str, int], ...] = ()
+    ) -> None:
         self.app = app
-        self.max_bytes = max_bytes
+        self.default_max_bytes = max_bytes
+        self.path_limits = path_limits
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        path = scope.get("path", "")
+        max_bytes = next(
+            (limit for prefix, limit in self.path_limits if path.startswith(prefix)),
+            self.default_max_bytes,
+        )
+        await self._limited(scope, receive, send, max_bytes)
+
+    async def _limited(self, scope: Scope, receive: Receive, send: Send, max_bytes: int) -> None:
         for name, value in scope.get("headers", []):
             if name == b"content-length":
                 try:
                     declared = int(value)
                 except ValueError:
-                    declared = self.max_bytes + 1
-                if declared > self.max_bytes:
-                    await self._reject(scope, receive, send)
+                    declared = max_bytes + 1
+                if declared > max_bytes:
+                    await self._reject(scope, receive, send, max_bytes)
                     return
         received = 0
         started = False
@@ -156,9 +170,9 @@ class BodySizeLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request" and not rejected:
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > max_bytes:
                     if not started:
-                        await self._reject(scope, receive, send)
+                        await self._reject(scope, receive, send, max_bytes)
                     rejected = True
                     # Tell the app the client went away so it stops reading the body.
                     return {"type": "http.disconnect"}
@@ -166,13 +180,13 @@ class BodySizeLimitMiddleware:
 
         await self.app(scope, limited_receive, tracking_send)
 
-    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def _reject(self, scope: Scope, receive: Receive, send: Send, max_bytes: int) -> None:
         from fastapi.responses import JSONResponse
 
         from app.core.errors import error_body
 
         response = JSONResponse(
             status_code=413,
-            content=error_body("request_too_large", f"Request body exceeds {self.max_bytes} bytes"),
+            content=error_body("request_too_large", f"Request body exceeds {max_bytes} bytes"),
         )
         await response(scope, receive, send)

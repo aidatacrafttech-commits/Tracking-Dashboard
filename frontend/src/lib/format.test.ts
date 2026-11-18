@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAge, formatAmount, formatDateTime, formatMoney, formatSigned, isCurrency } from "./format";
+import { formatAge, formatAmount, formatDateTime, formatMoney, formatPaise, formatSigned, isCurrency } from "./format";
 
 describe("money formatting", () => {
   it("formats each record in its own currency", () => {
@@ -7,6 +7,12 @@ describe("money formatting", () => {
     expect(formatMoney("1250.75", "USD")).toMatch(/\$/);
     expect(formatMoney("2000", "INR")).toMatch(/₹|INR/);
     expect(formatMoney("2000", "INR")).toContain("2,000.00");
+  });
+
+  it("formats paise exactly", () => {
+    expect(formatPaise(79950, "INR")).toContain("799.50");
+    expect(formatPaise(5, "INR")).toContain("0.05");
+    expect(formatPaise(null, "INR")).toBe("Unknown");
   });
 
   it("formats from the decimal string without float drift", () => {

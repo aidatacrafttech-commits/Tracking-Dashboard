@@ -3,7 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAppSettings, useOpsStatus } from "../api/hooks";
 import { useAuth } from "../auth/AuthContext";
 import { useLiveState } from "../live/LiveUpdates";
-import { IconAlerts, IconBook, IconCloud, IconLogo, IconMenu, IconOverview, IconPayments, IconProviders, IconThresholds, IconTicket, IconUsers } from "./icons";
+import { IconAlerts, IconBook, IconCloud, IconLogo, IconMenu, IconOverview, IconPayments, IconProviders, IconThresholds, IconTicket, IconUsers, IconClipboard } from "./icons";
 
 const NAV = [
   { to: "/", label: "Overview", icon: IconOverview, end: true },
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/vouchers", label: "Voucher Management", icon: IconTicket },
   { to: "/courses", label: "Course Management", icon: IconBook },
   { to: "/app-users", label: "App Users", icon: IconUsers },
+  { to: "/placement-drives", label: "Placement Drives", icon: IconClipboard, ownerOnly: true },
 ];
 
 const LIVE_LABELS = {
@@ -56,7 +57,7 @@ export function Layout() {
           <span>Adhyaapak AI Dashboard</span>
         </div>
         <nav className="nav">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter((item) => canWrite || !("ownerOnly" in item)).map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} onClick={() => setOpen(false)}>
               <Icon />
               {label}

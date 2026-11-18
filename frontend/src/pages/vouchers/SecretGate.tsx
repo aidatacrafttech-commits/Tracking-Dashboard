@@ -2,8 +2,14 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { ADHYAAPAK_API_BASE, adminFetch, adminSecret, AdminApiError, useAdminSecret } from "./adminApi";
 import { Notice } from "../../components/ui";
 
-/** Shows the voucher admin only once a working admin secret has been entered. */
-export function SecretGate({ children }: { children: ReactNode }) {
+/** Shows an AdhyaapakAI admin screen only once a working admin secret has been entered. One secret
+ * (the backend's ADMIN_SECRET) opens every such screen in this tab. */
+export function SecretGate({ children, title = "Voucher Management", checkPath = "/vouchers/subjects" }: {
+  children: ReactNode;
+  title?: string;
+  /** A cheap admin GET that proves the secret. */
+  checkPath?: string;
+}) {
   const { secret, rejected } = useAdminSecret();
   if (!ADHYAAPAK_API_BASE)
     return (
@@ -12,10 +18,10 @@ export function SecretGate({ children }: { children: ReactNode }) {
         <code>.env.example</code>) and restart the dev server.
       </Notice>
     );
-  return secret ? <>{children}</> : <SecretForm rejected={rejected} />;
+  return secret ? <>{children}</> : <SecretForm rejected={rejected} title={title} checkPath={checkPath} />;
 }
 
-function SecretForm({ rejected }: { rejected: boolean }) {
+function SecretForm({ rejected, title, checkPath }: { rejected: boolean; title: string; checkPath: string }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,7 +34,7 @@ function SecretForm({ rejected }: { rejected: boolean }) {
     setError(null);
     try {
       // A cheap admin call proves the secret before anything else is loaded.
-      await adminFetch("/vouchers/subjects", { secret: candidate });
+      await adminFetch(checkPath, { secret: candidate });
       setValue("");
       adminSecret.set(candidate);
     } catch (err) {
@@ -41,9 +47,9 @@ function SecretForm({ rejected }: { rejected: boolean }) {
   return (
     <section className="card" aria-labelledby="secret-title" style={{ maxWidth: 520 }}>
       <form onSubmit={submit} className="stack" noValidate>
-        <h2 id="secret-title">Unlock Voucher Management</h2>
+        <h2 id="secret-title">Unlock {title}</h2>
         <p className="muted">
-          Voucher Management uses the AdhyaapakAI backend ({ADHYAAPAK_API_BASE}). Enter its admin secret to continue. The secret is kept
+          {title} uses the AdhyaapakAI backend ({ADHYAAPAK_API_BASE}). Enter its admin secret to continue. The secret is kept
           only in this browser tab and is cleared when you sign out or close the tab.
         </p>
         {rejected && !error && <Notice tone="warning">The admin secret was not accepted. Enter it again.</Notice>}

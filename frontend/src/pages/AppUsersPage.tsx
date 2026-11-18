@@ -4,13 +4,13 @@ import { ApiError } from "../api/client";
 import { DataTable } from "../components/DataTable";
 import { IconRefresh } from "../components/icons";
 import { Badge, Card, EmptyState, ErrorState, LoadingBlock, Notice, PageHeader, Skeleton, StatCard } from "../components/ui";
-import { formatDate, formatDateTime } from "../lib/format";
-import { money } from "./courses/shared";
+import { formatDate, formatDateTime, formatPaise as money } from "../lib/format";
 import { DailyBars } from "./appUsers/DailyBars";
 import {
-  fetchDeletions, fetchLive, fetchSignups, fetchStatus, fetchSummary, KEY, MAX_RANGE_DAYS, RANGES, todayIn,
+  fetchDeletions, fetchLive, fetchSignups, fetchStatus, fetchSummary, KEY, MAX_RANGE_DAYS, RANGES, todayIn, useUsersView,
   type AppUsersSummary, type Breakdown, type Selection,
 } from "./appUsers/api";
+import { SecretGate } from "./vouchers/SecretGate";
 
 const IST = "Asia/Kolkata";
 const n = (v: number) => v.toLocaleString("en-IN");
@@ -27,7 +27,17 @@ function rangeProblem(start: string, end: string, today: string): string | null 
   return null;
 }
 
+/** Everything here comes from the AdhyaapakAI backend's admin API (/admin/users), with the
+ * admin secret typed into this tab, like Voucher Management. */
 export function AppUsersPage() {
+  return (
+    <SecretGate title="App Users" checkPath="/admin/users/status">
+      <AppUsers />
+    </SecretGate>
+  );
+}
+
+function AppUsers() {
   const today = todayIn(IST);
   const [preset, setPreset] = useState<string>("30");
   const [from, setFrom] = useState("");
@@ -38,14 +48,15 @@ export function AppUsersPage() {
   // a setup notice instead of making calls that can only fail.
   const status = useQuery({ queryKey: [...KEY, "status"], queryFn: fetchStatus, staleTime: Infinity, retry: false });
   const configured = status.data?.configured === true;
+  const view = useUsersView();
 
   const custom = preset === "custom";
   const problem = custom ? rangeProblem(from, to, today) : null;
   const selection: Selection | null = custom ? (problem ? null : { start: from, end: to }) : { days: Number(preset) as (typeof RANGES)[number] };
   const summary = useQuery({
-    queryKey: [...KEY, "summary", selection],
-    queryFn: () => fetchSummary(selection as Selection),
-    enabled: configured && selection !== null,
+    queryKey: [...KEY, "summary", selection, view.tz],
+    queryFn: () => fetchSummary(selection as Selection, view.tz as string),
+    enabled: configured && selection !== null && view.tz !== null,
     placeholderData: (prev) => prev,
     ...LIVE,
   });
@@ -94,8 +105,8 @@ export function AppUsersPage() {
         : status.error ? <ErrorState error={status.error} onRetry={() => status.refetch()} />
         : !configured ? (
           <Notice tone="warning">
-            <strong>App users are not configured.</strong> Set <code>ADHYAAPAK_MONGO_URL</code> and <code>ADHYAAPAK_MONGO_DB</code> in the
-            dashboard's <code>backend/.env</code> and restart the dashboard.
+            <strong>App users are not configured.</strong> The AdhyaapakAI backend has no database: set <code>MONGO_URL</code> and{" "}
+            <code>DB_NAME</code> in its <code>.env</code> and restart it.
           </Notice>
         ) : summary.error ? <LoadError error={summary.error} onRetry={() => summary.refetch()} />
         : (
@@ -121,8 +132,8 @@ function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) 
   if (error instanceof ApiError && error.code === "app_users_forbidden")
     return (
       <Notice tone="critical">
-        <strong>Not authorised.</strong> The app database refused the dashboard's login. Check <code>ADHYAAPAK_MONGO_URL</code> in the
-        dashboard's <code>backend/.env</code> and restart the dashboard.
+        <strong>Not authorised.</strong> The database refused the AdhyaapakAI backend's login. Check <code>MONGO_URL</code> in its{" "}
+        <code>.env</code> and restart it.
       </Notice>
     );
   return <ErrorState error={error} onRetry={onRetry} />;
@@ -195,16 +206,17 @@ function PeopleList({ range, today, onRange, enabled }: { range: DateRange; toda
   const [kind, setKind] = useState<ListKind>("signups");
   const [q, setQ] = useState("");
   const problem = rangeProblem(range.start, range.end, today);
-  const ready = enabled && !problem;
+  const view = useUsersView();
+  const ready = enabled && !problem && view.tz !== null;
   const signups = useQuery({
-    queryKey: [...KEY, "signups", range.start, range.end],
-    queryFn: () => fetchSignups(range.start, range.end),
+    queryKey: [...KEY, "signups", range.start, range.end, view],
+    queryFn: () => fetchSignups(range.start, range.end, view),
     enabled: ready && kind === "signups",
     ...LIVE,
   });
   const deletions = useQuery({
-    queryKey: [...KEY, "deletions", range.start, range.end],
-    queryFn: () => fetchDeletions(range.start, range.end),
+    queryKey: [...KEY, "deletions", range.start, range.end, view],
+    queryFn: () => fetchDeletions(range.start, range.end, view),
     enabled: ready && kind === "deletions",
     ...LIVE,
   });

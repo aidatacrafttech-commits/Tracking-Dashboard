@@ -1,13 +1,11 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ErrorState, PageHeader, Skeleton, StatCard } from "../components/ui";
-import { money } from "./courses/shared";
-import { useCourseSummary } from "./courses/api";
-import { CourseList } from "./courses/CourseList";
-import { EnrollmentsPanel } from "./courses/EnrollmentsPanel";
-import { TaxonomyPanel } from "./courses/TaxonomyPanel";
+import { PageHeader } from "../components/ui";
+import { AppAcademics, AppCourses } from "./courses/AppCourses";
+import { AppVideos } from "./courses/AppVideos";
+import { SecretGate } from "./vouchers/SecretGate";
 
-/** WAI-ARIA tabs kept in ?tab= (shared by the course pages). */
+/** WAI-ARIA tabs kept in ?tab=. */
 export function Tabs<T extends string>({ tabs, label, children }: { tabs: readonly { id: T; label: string }[]; label: string; children: (tab: T) => ReactNode }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get("tab");
@@ -37,41 +35,22 @@ export function Tabs<T extends string>({ tabs, label, children }: { tabs: readon
 }
 
 const TABS = [
-  { id: "courses", label: "Courses" },
-  { id: "enrollments", label: "Enrollments" },
-  { id: "taxonomy", label: "Classes, streams & subjects" },
+  { id: "app", label: "App videos" },
+  { id: "prices", label: "Courses & prices" },
+  { id: "taxonomy", label: "Classes, streams & goals" },
 ] as const;
-
-function Summary() {
-  const { data, error, isPending, refetch } = useCourseSummary();
-  if (error) return <ErrorState error={error} onRetry={() => refetch()} />;
-  const n = (v: number) => v.toLocaleString();
-  return (
-    <div className="grid grid-stats" aria-busy={isPending} style={{ marginBottom: 16 }}>
-      {isPending ? Array.from({ length: 8 }, (_, i) => <div key={i} className="card"><Skeleton height={44} /></div>) : (
-        <>
-          <StatCard label="Total courses" value={n(data.total_courses)} sub={data.scheduled ? `${n(data.scheduled)} scheduled to launch` : undefined} />
-          <StatCard label="Published courses" value={n(data.published + data.scheduled)} sub={`${n(data.published)} live now`} />
-          <StatCard label="Draft courses" value={n(data.draft)} />
-          <StatCard label="Archived courses" value={n(data.archived)} />
-          <StatCard label="Total enrollments" value={n(data.total_enrollments)} sub={data.pending_enrollments ? `${n(data.pending_enrollments)} awaiting payment` : undefined} />
-          <StatCard label="Active enrollments" value={n(data.active_enrollments)} />
-          <StatCard label="Expired enrollments" value={n(data.expired_enrollments)} />
-          <StatCard label="Total course revenue" value={data.revenue.length ? data.revenue.map((r) => money(r.amount_paise, r.currency)).join(" + ") : money(0, "INR")}
-            sub="Amounts actually paid; refunds excluded" />
-        </>
-      )}
-    </div>
-  );
-}
 
 export function CoursesPage() {
   return (
     <>
-      <PageHeader title="Course Management" description="Courses, their content and languages, and every student's enrollment and access." />
-      <Summary />
+      <PageHeader title="Course Management" description="The AdhyaapakAI app's lectures, courses, prices and home-screen cards." />
       <Tabs tabs={TABS} label="Course management">
-        {(tab) => (tab === "courses" ? <CourseList /> : tab === "enrollments" ? <EnrollmentsPanel /> : <TaxonomyPanel />)}
+        {(tab) => (
+          // Every tab uses the AdhyaapakAI backend's admin API (like Voucher Management).
+          <SecretGate title="Course Management" checkPath="/admin/catalog/status">
+            {tab === "app" ? <AppVideos /> : tab === "prices" ? <AppCourses /> : <AppAcademics />}
+          </SecretGate>
+        )}
       </Tabs>
     </>
   );

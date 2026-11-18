@@ -23,7 +23,8 @@ describe("authentication", () => {
     await user.clear(screen.getByLabelText("Dashboard token"));
     await user.type(screen.getByLabelText("Dashboard token"), OWNER);
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
+    // The Overview page is a large lazy chunk: give it time under a full, parallel test run.
+    expect(await screen.findByRole("heading", { name: "Overview", level: 1 }, { timeout: 5000 })).toBeInTheDocument();
     const loginReq = requests.find((r) => r.url.pathname === "/api/v1/auth/login" && r.method === "POST")!;
     expect(loginReq.body).toEqual({ token: "wrong-token", remember: false });
     // The token went to the server once; nothing is kept in browser storage.

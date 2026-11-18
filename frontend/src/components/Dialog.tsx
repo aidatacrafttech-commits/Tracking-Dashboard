@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { IconClose } from "./icons";
 
 /**
@@ -84,6 +84,7 @@ export function ConfirmDialog({
   confirmLabel,
   destructive = false,
   busy = false,
+  confirmWord,
   onConfirm,
   onCancel,
 }: {
@@ -93,9 +94,20 @@ export function ConfirmDialog({
   confirmLabel: string;
   destructive?: boolean;
   busy?: boolean;
+  /** When set, the confirm button waits until this word is typed (e.g. "delete"). */
+  confirmWord?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const [typed, setTyped] = useState("");
+  const typeId = useId();
+  // Each time it opens, the typed word starts empty (adjusted while rendering, not in an effect).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setTyped("");
+  }
+  const waiting = !!confirmWord && typed.trim().toLowerCase() !== confirmWord.toLowerCase();
   return (
     <Dialog
       open={open}
@@ -110,7 +122,7 @@ export function ConfirmDialog({
             type="button"
             className={`btn ${destructive ? "btn-danger" : "btn-primary"}`}
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || waiting}
           >
             {busy ? "Working…" : confirmLabel}
           </button>
@@ -118,6 +130,14 @@ export function ConfirmDialog({
       }
     >
       {children}
+      {confirmWord && (
+        <div className="field" style={{ marginTop: 12 }}>
+          <label htmlFor={typeId}>
+            Type <strong>{confirmWord}</strong> to confirm
+          </label>
+          <input id={typeId} type="text" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} disabled={busy} />
+        </div>
+      )}
     </Dialog>
   );
 }

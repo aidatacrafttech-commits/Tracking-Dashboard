@@ -621,6 +621,16 @@ legend {
   border-radius: var(--radius);
   background: var(--surface);
 }
+/* A table box with a fixed most-height: its rows scroll inside, the column headings stay on top. */
+.table-wrap.table-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.table-wrap.table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -639,6 +649,10 @@ th {
   color: var(--text-2);
   background: var(--surface-2);
   white-space: nowrap;
+}
+/* Rows of inputs (e.g. the app's classes): text sits level with the boxes. */
+table.cells-middle td {
+  vertical-align: middle;
 }
 tbody tr:last-child td {
   border-bottom: 0;

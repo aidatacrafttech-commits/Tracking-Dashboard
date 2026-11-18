@@ -46,11 +46,12 @@ const PAGES = [
   { label: "AWS", heading: "AWS monitoring", ready: "tutor-worker" },
   // Without the AdhyaapakAI admin secret the page shows only the secret screen (no backend call).
   { label: "Voucher Management", heading: "Voucher Management", ready: "Unlock Voucher Management" },
-  // The e2e fixture database has no courses: the page shows its real empty state.
-  { label: "Course Management", heading: "Course Management", ready: "No courses yet" },
+  // No app bucket in e2e: the first tab (App videos) shows its real "not configured" notice.
+  { label: "Course Management", heading: "Course Management", ready: "App videos are not configured" },
   // No app database in e2e: the page shows its real "not configured" notice.
   { label: "App Users", heading: "App Users", ready: "App users are not configured" },
-  // No AdhyaapakAI backend in e2e: the page shows its real "not configured" notice.
+  // Same database, so the same real "not configured" notice.
+  { label: "Placement Drives", heading: "Placement Drives", ready: "Placement drives are not configured" },
 ];
 
 test("content security policy blocks injected inline scripts", async ({ page }) => {

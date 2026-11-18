@@ -26,6 +26,7 @@ export function DataTable<T>({
   sort,
   onSort,
   empty,
+  maxHeight,
 }: {
   caption: string;
   columns: Column<T>[];
@@ -34,12 +35,15 @@ export function DataTable<T>({
   sort?: SortState;
   onSort?: (key: string) => void;
   empty?: ReactNode;
+  /** Stop growing at this height: more rows scroll inside the box, under a header that stays put. */
+  maxHeight?: string;
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
+  const wrap = maxHeight ? "table-wrap table-scroll" : "table-wrap";
   return (
-    // Focusable, labelled region so keyboard users can scroll wide tables sideways.
+    // Focusable, labelled region so keyboard users can scroll wide (or tall) tables.
     // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-    <div className="table-wrap" tabIndex={0} role="region" aria-label={`${caption} table`}>
+    <div className={wrap} style={maxHeight ? { maxHeight } : undefined} tabIndex={0} role="region" aria-label={`${caption} table`}>
       <table className="responsive">
         <caption className="visually-hidden">{caption}</caption>
         <thead>

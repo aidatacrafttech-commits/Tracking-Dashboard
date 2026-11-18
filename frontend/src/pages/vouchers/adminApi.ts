@@ -112,7 +112,10 @@ export async function adminFetch<T>(
     }
   }
   if (!response.ok) {
-    const detail = (payload as { detail?: unknown } | null)?.detail;
+    const body = payload as { detail?: unknown; code?: unknown; details?: unknown } | null;
+    const detail = body?.detail;
+    // Coded errors ({detail, code, details}) let screens branch, e.g. "catalog_changed".
+    const code = typeof body?.code === "string" ? body.code : `http_${response.status}`;
     // A wrong or missing secret: back to the secret screen (unless this call is the check
     // of a newly typed secret, which reports the problem itself).
     if (response.status === 403 && init.secret === undefined) adminSecret.clear(true);
@@ -122,7 +125,7 @@ export async function adminFetch<T>(
         : Array.isArray(detail)
           ? "Some fields need attention."
           : `Request failed (${response.status})`;
-    throw new AdminApiError(response.status, `http_${response.status}`, message, null, Array.isArray(detail) ? detail : undefined);
+    throw new AdminApiError(response.status, code, message, null, body?.details ?? (Array.isArray(detail) ? detail : undefined));
   }
   return payload as T;
 }

@@ -38,6 +38,7 @@ def adapter(fake: FakeHttp) -> SarvamAdapter:
 def test_only_the_public_status_page_is_contacted_without_any_key() -> None:
     fake = FakeHttp().json(STATUS, STATUS_OK)
     a = adapter(fake)
+
     async def both():  # type: ignore[no-untyped-def]
         try:
             return [await a.fetch_balance(), await a.health_check()]

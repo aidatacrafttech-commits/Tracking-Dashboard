@@ -36,6 +36,14 @@ export function formatMoney(value: Decimal | null | undefined, currency: string)
   }
 }
 
+/** Money given in paise (integer), e.g. 79900 -> "₹799.00"; exact, no floating point. */
+export function formatPaise(paise: number | null | undefined, currency: string): string {
+  if (paise === null || paise === undefined) return formatMoney(null, currency);
+  const sign = paise < 0 ? "-" : "";
+  const abs = Math.abs(Math.trunc(paise));
+  return formatMoney(`${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`, currency);
+}
+
 const UNIT_LABELS: Record<string, string> = {
   CREDITS: "credits",
   tokens: "tokens",

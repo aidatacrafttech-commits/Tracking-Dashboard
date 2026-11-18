@@ -33,16 +33,6 @@ EXPECTED_TABLES = {
     "voucher_users",
     "voucher_usage_events",
     "voucher_targets",
-    "course_taxonomy_terms",
-    "course_assets",
-    "courses",
-    "course_playlists",
-    "course_chapters",
-    "course_lectures",
-    "course_lecture_variants",
-    "course_lecture_resources",
-    "course_enrollments",
-    "course_enrollment_events",
     "alembic_version",
 }
 
@@ -141,5 +131,50 @@ def test_0007_keeps_existing_vouchers_usable(tmp_path: Path) -> None:
             }
         assert tuple(row) == ("course", "percentage", 0, "INR", 1, 2)
         assert categories == {"course"}
+    finally:
+        engine.dispose()
+
+
+def test_0011_drops_the_old_course_tables(tmp_path: Path) -> None:
+    """The old Courses module's tables go, rows and all; a downgrade brings them back empty."""
+    url = f"sqlite:///{(tmp_path / 'm.db').as_posix()}"
+    cfg = alembic_config(url)
+    command.upgrade(cfg, "0010")
+    engine = create_db_engine(url)
+    now = "2026-11-16 10:00:00.000000"
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO course_taxonomy_terms (id, kind, name, name_key,"
+                    " sort_order, is_active, created_at, updated_at)"
+                    " VALUES (1, 'class', '12', '12', 0, 1, :t, :t)"
+                ),
+                {"t": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO courses (id, title, class_id, is_free, currency,"
+                    " status, validity_value, validity_unit, created_by, updated_by, version,"
+                    " created_at, updated_at) VALUES (1, 'Math', 1, 0, 'INR', 'draft',"
+                    " 6, 'months', 'owner', 'owner', 1, :t, :t)"
+                ),
+                {"t": now},
+            )
+    finally:
+        engine.dispose()
+    command.upgrade(cfg, "head")
+    engine = create_db_engine(url)
+    try:
+        assert not {t for t in inspect(engine).get_table_names() if t.startswith("course")}
+    finally:
+        engine.dispose()
+    command.downgrade(cfg, "0010")
+    engine = create_db_engine(url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM courses")).scalar() == 0
+            cols = {c["name"] for c in inspect(conn).get_columns("courses")}
+        assert {"class_level", "stream", "target_goals"} <= cols
     finally:
         engine.dispose()

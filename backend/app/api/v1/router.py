@@ -6,9 +6,9 @@ from app.api.v1 import (
     app_users,
     auth,
     aws,
-    courses,
     dashboard,
     health,
+    placement_drives,
     presence,
     providers,
     settings,
@@ -27,7 +27,6 @@ api_router.include_router(auth.router)
 api_router.include_router(admin.router)
 api_router.include_router(vouchers.router)
 api_router.include_router(vouchers.integration_router)
-api_router.include_router(courses.router)
-api_router.include_router(courses.integration_router)
 api_router.include_router(app_users.router)
 api_router.include_router(presence.router)
+api_router.include_router(placement_drives.router)

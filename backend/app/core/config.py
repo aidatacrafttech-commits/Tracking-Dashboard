@@ -12,7 +12,6 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -194,37 +193,21 @@ class Settings(BaseSettings):
     # Starting user limit; the owner can change it at runtime (stored in the database).
     voucher_default_user_limit: int = Field(default=1000, ge=1, le=10_000_000)
 
-    # --- AdhyaapakAI MongoDB (App Users screen) -----------------------------------------
-    # Read-only analytics over the app's users: the dashboard SERVER connects; the URL never
-    # reaches the browser or the logs. Use an Atlas user with only the "read" role on this
-    # database. Both empty = the screen shows "not configured".
-    adhyaapak_mongo_url: SecretStr | None = None
-    adhyaapak_mongo_db: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    # --- AdhyaapakAI app ----------------------------------------------------------------
+    # Course Management, Placement Drives and App Users use the AdhyaapakAI backend's admin
+    # API from the browser (x-admin-secret typed into the tab); the dashboard has no keys to
+    # the app's database or storage.
     # Live "online now": the mobile app sends heartbeats signed with its own login token; the
     # dashboard verifies them with the AdhyaapakAI backend's JWT_SECRET. Unset = presence off.
     adhyaapak_jwt_secret: SecretStr | None = None
 
-    # --- Course management ----------------------------------------------------------
-    # Bearer token for the trusted app backend (it verifies payments and authenticates
-    # students) to confirm payments, enroll students and check access. Unset = API off.
-    course_api_token: SecretStr | None = None
-    # S3 bucket for course files (thumbnails, videos, audio, subtitles, PDFs). Separate
-    # from the read-only AWS monitoring credentials: these keys need s3:PutObject and
-    # s3:GetObject on this bucket only. Unset bucket = uploads off (video URLs still work).
+    # --- Course Management: the app's S3 bucket, by name only -------------------------
+    # The browser uploads to it and previews from it with links the AdhyaapakAI backend
+    # signs, so the UI's CSP must allow its origin. No keys: the dashboard never calls S3.
     course_assets_bucket: str | None = Field(
         default=None, pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
     )
     course_assets_region: str = Field(default="ap-south-1", pattern=r"^[a-z]{2}-[a-z]+-\d$")
-    # Objects go to {prefix}{course_id}/{asset_id}-{file}. Never under videos/ or notes/: the
-    # AdhyaapakAI backend's S3 sync parses those keys if the bucket is ever shared with it.
-    course_assets_prefix: str = Field(
-        default="course-assets/", pattern=r"^[A-Za-z0-9!_.*'()-][A-Za-z0-9!_.*'()/-]{0,198}/$"
-    )
-    course_assets_access_key_id: SecretStr | None = None
-    course_assets_secret_access_key: SecretStr | None = None
-    course_assets_url_ttl_seconds: int = Field(default=900, ge=60, le=43_200)
-    course_asset_max_video_mb: int = Field(default=4096, ge=1, le=51_200)
-    course_asset_max_file_mb: int = Field(default=100, ge=1, le=2048)
 
     @property
     def course_assets_origin(self) -> str | None:
@@ -232,13 +215,6 @@ class Settings(BaseSettings):
         if not self.course_assets_bucket:
             return None
         return f"https://{self.course_assets_bucket}.s3.{self.course_assets_region}.amazonaws.com"
-
-    @field_validator("course_assets_prefix")
-    @classmethod
-    def _course_prefix(cls, value: str) -> str:
-        if value.lower().startswith(("videos/", "notes/")):
-            raise ValueError("course files cannot live under videos/ or notes/")
-        return value
 
     @field_validator("alert_recipients", mode="before")
     @classmethod
@@ -363,13 +339,8 @@ class Settings(BaseSettings):
     @field_validator(
         "dashboard_viewer_token",
         "voucher_api_token",
-        "course_api_token",
         "course_assets_bucket",
-        "adhyaapak_mongo_url",
-        "adhyaapak_mongo_db",
         "adhyaapak_jwt_secret",
-        "course_assets_access_key_id",
-        "course_assets_secret_access_key",
         mode="before",
     )
     @classmethod
@@ -378,9 +349,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator(
-        "dashboard_owner_token", "dashboard_viewer_token", "voucher_api_token", "course_api_token"
-    )
+    @field_validator("dashboard_owner_token", "dashboard_viewer_token", "voucher_api_token")
     @classmethod
     def _validate_token_strength(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and len(value.get_secret_value()) < MIN_TOKEN_LENGTH:
@@ -414,25 +383,6 @@ class Settings(BaseSettings):
             self.dashboard_viewer_token.get_secret_value() if self.dashboard_viewer_token else None,
         }:
             raise ValueError("VOUCHER_API_TOKEN must differ from the dashboard tokens")
-        if self.course_api_token is not None and self.course_api_token.get_secret_value() in {
-            self.dashboard_owner_token.get_secret_value(),
-            self.dashboard_viewer_token.get_secret_value() if self.dashboard_viewer_token else None,
-            self.voucher_api_token.get_secret_value() if self.voucher_api_token else None,
-        }:
-            raise ValueError("COURSE_API_TOKEN must differ from the other tokens")
-        if (self.course_assets_access_key_id is None) != (
-            self.course_assets_secret_access_key is None
-        ):
-            raise ValueError(
-                "set both COURSE_ASSETS_ACCESS_KEY_ID and COURSE_ASSETS_SECRET_ACCESS_KEY,"
-                " or neither"
-            )
-        if (self.adhyaapak_mongo_url is None) != (self.adhyaapak_mongo_db is None):
-            raise ValueError("set both ADHYAAPAK_MONGO_URL and ADHYAAPAK_MONGO_DB, or neither")
-        if self.adhyaapak_mongo_url is not None and not re.match(
-            r"^mongodb(\+srv)?://\S+$", self.adhyaapak_mongo_url.get_secret_value()
-        ):
-            raise ValueError("ADHYAAPAK_MONGO_URL must start with mongodb:// or mongodb+srv://")
         if self.app_env == "production":
             # API schema is not needed in production and widens the attack surface.
             self.docs_enabled = False
@@ -455,20 +405,9 @@ class Settings(BaseSettings):
             self.aws_session_token,
             self.smtp_password,
             self.voucher_api_token,
-            self.course_api_token,
-            self.course_assets_access_key_id,
-            self.course_assets_secret_access_key,
-            self.adhyaapak_mongo_url,
             self.adhyaapak_jwt_secret,
         ]
-        values = [c.get_secret_value() for c in candidates if c is not None]
-        # The redactor has no pattern for URI userinfo, so also register the bare password
-        # (a driver error could quote it without the rest of the URL).
-        if self.adhyaapak_mongo_url is not None:
-            userinfo = urlsplit(self.adhyaapak_mongo_url.get_secret_value()).password
-            if userinfo:
-                values += [userinfo, unquote(userinfo)]
-        return values
+        return [c.get_secret_value() for c in candidates if c is not None]
 
     @property
     def resolved_database_url(self) -> str:

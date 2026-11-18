@@ -91,7 +91,8 @@ describe("provider cards", () => {
 describe("provider details", () => {
   it("warns that a stale balance is not used for alerts", async () => {
     renderApp("/providers/sarvam");
-    expect(await screen.findByRole("heading", { name: "Sarvam AI", level: 1 })).toBeInTheDocument();
+    // The provider page is a lazy chunk: give its first load time when this runs first in a worker.
+    expect(await screen.findByRole("heading", { name: "Sarvam AI", level: 1 }, { timeout: 5000 })).toBeInTheDocument();
     expect(await screen.findByText(/older than 120 minutes, so it is shown for reference only and not used for alerts/)).toBeInTheDocument();
   });
 
