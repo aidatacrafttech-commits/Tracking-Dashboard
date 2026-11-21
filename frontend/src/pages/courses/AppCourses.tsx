@@ -257,12 +257,12 @@ function Editor({ catalog, storage, onReload }: { catalog: Catalog; storage: boo
     },
     {
       key: "active",
-      header: "Shown",
+      header: "Status",
       render: (b) => (
-        <label className="row small" style={{ gap: 6 }}>
-          <input type="checkbox" checked={b.active} aria-label={`Show ${b.title} on the home screen`}
+        <label className="row small" style={{ gap: 6 }} title="Active: the app shows this card (free or paid). Inactive: the app hides it.">
+          <input type="checkbox" checked={b.active} aria-label={`${b.title} active`}
             onChange={(e) => setBatches(draft.batches.map((x) => (x.id === b.id ? { ...x, active: e.target.checked } : x)))} />
-          {b.active ? "Shown" : "Hidden"}
+          {b.active ? "Active" : "Inactive"}
         </label>
       ),
     },
@@ -333,7 +333,7 @@ function Editor({ catalog, storage, onReload }: { catalog: Catalog; storage: boo
 
       <Card
         title="Home-screen batches"
-        description="The cards on the app's home screen, in this order. Each opens its lectures and sells its course."
+        description="The cards on the app's home screen, in this order. Each opens its lectures and sells its course. Only active cards show in the app, free or paid."
         actions={<button type="button" className="btn btn-sm btn-primary" onClick={() => setEditing({ kind: "batch", batch: null, index: null })} disabled={!storage}>+ New batch</button>}
       >
         <DataTable caption="Home-screen batches" columns={batchColumns} rows={shownBatches} rowKey={(b) => b.id} maxHeight={LIST_HEIGHT}
@@ -413,6 +413,7 @@ function SaveSummary({ before, after }: { before: Draft; after: Draft }) {
   for (const b of after.batches) {
     const was = before.batches.find((x) => x.id === b.id);
     if (!was) continue;
+    if (was.active !== b.active) lines.push(`${b.title}: ${b.active ? "active (shown in the app)" : "inactive (hidden from the app)"}`);
     if (was.banner_key && !b.banner_key) lines.push(`${b.title}: banner deleted${b.banner_from_course ? " (shows the course image)" : ""}`);
     else if (was.banner_key && b.banner_key !== was.banner_key) lines.push(`${b.title}: new banner`);
     if (was.banner_key_dark && !b.banner_key_dark) lines.push(`${b.title}: dark-mode banner deleted (dark mode shows the main one)`);

@@ -118,8 +118,21 @@ export const updateDrive = (day: string, body: DriveInput) =>
   adminFetch<SavedDrive>(`${AP_API}/drives/${encodeURIComponent(day)}`, { method: "PUT", body });
 export const setActive = (day: string, active: boolean) =>
   adminFetch<DriveSummary>(`${AP_API}/drives/${encodeURIComponent(day)}/active`, { method: "POST", body: { active } });
-/** Deletes a drive that is off and that nobody has opened (the server refuses others). */
-export const deleteDrive = (day: string) => adminFetch<void>(`${AP_API}/drives/${encodeURIComponent(day)}`, { method: "DELETE" });
+/** What deleting a drive removes, and what stops it (empty blockers: it can be deleted). */
+export interface DeletePlan {
+  date: string;
+  open_from: string | null;
+  label: string;
+  question_count: number;
+  opened: number;
+  submitted: number;
+  blockers: string[];
+}
+export const fetchDeletePlan = (day: string) => adminFetch<DeletePlan>(`${AP_API}/drives/${encodeURIComponent(day)}/delete-check`);
+/** Deletes a drive that is off. One that students opened needs withResults: their attempts and
+ * results are deleted with it (the server refuses without it). */
+export const deleteDrive = (day: string, withResults = false) =>
+  adminFetch<void>(`${AP_API}/drives/${encodeURIComponent(day)}`, { method: "DELETE", query: withResults ? { with_results: "true" } : undefined });
 export const newSheetKey = () => adminFetch<{ sheet_key: string }>(`${AP_API}/sheet-key`).then((r) => r.sheet_key);
 export const fetchResults = (day: string) => adminFetch<DriveResults>(`${AP_API}/results`, { query: { date: day } });
 

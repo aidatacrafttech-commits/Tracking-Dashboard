@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { DataTable, type Column } from "../components/DataTable";
-import { ConfirmDialog } from "../components/Dialog";
+import { ConfirmDialog, Dialog } from "../components/Dialog";
 import { IconPlus } from "../components/icons";
 import { useToast } from "../components/Toast";
 import { Badge, Card, EmptyState, ErrorState, LoadingBlock, Notice, PageHeader } from "../components/ui";
-import { deleteDrive, fetchDrives, fetchStatus, KEY, setActive, todayIst, type DriveSummary } from "./placementDrives/api";
+import { deleteDrive, fetchDeletePlan, fetchDrives, fetchStatus, KEY, setActive, todayIst, type DriveSummary } from "./placementDrives/api";
 import { DriveEditor } from "./placementDrives/DriveEditor";
 import { SecretGate } from "./vouchers/SecretGate";
 import { Results } from "./placementDrives/Results";
@@ -48,7 +48,6 @@ function PlacementDrives() {
   const [toggle, setToggle] = useState<DriveSummary | null>(null);
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState<DriveSummary | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const toast = useToast();
   const client = useQueryClient();
@@ -88,23 +87,6 @@ function PlacementDrives() {
       toast.error(err, "The drive couldn't be switched.");
     } finally {
       setToggling(false);
-    }
-  }
-
-  async function confirmDelete() {
-    if (!removing) return;
-    setDeleting(true);
-    try {
-      await deleteDrive(removing.date);
-      toast.success(`${removing.label} (${window_(removing)}) is deleted.`);
-      if (resultsDay === removing.date) setResultsDay(null);
-      await client.invalidateQueries({ queryKey: KEY });
-      setRemoving(null);
-    } catch (err) {
-      toast.error(err, "The drive couldn't be deleted.");
-      setRemoving(null);
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -152,7 +134,7 @@ function PlacementDrives() {
       key: "actions",
       header: "Actions",
       render: (d) => (
-        <div className="row">
+        <div className="row" style={{ flexWrap: "nowrap" }}>
           <button type="button" className="btn btn-sm" onClick={() => setView({ kind: "edit", day: d.date })} aria-label={`Edit ${d.label} (${d.date})`}>
             Edit
           </button>
@@ -163,15 +145,15 @@ function PlacementDrives() {
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => openResults(d.date)} aria-label={`Results for ${d.label} (${d.date})`}>
             Results
           </button>
-          {/* Only a drive nobody has opened: results need the drive's paper and answer key. */}
-          {d.opened === 0 && (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRemoving(d)} disabled={d.active}
-              aria-label={`Delete ${d.label} (${d.date})`} aria-describedby={d.active ? `del-${d.date}` : undefined}>
-              Delete
-            </button>
-          )}
-          {d.opened === 0 && d.active && (
-            <span className="small muted" id={`del-${d.date}`}>
+          {/* Any drive that is off; the dialog says what goes (results too, if students opened it). */}
+          {/* Red and last, like Delete in Course Management. A drive that is on must be turned off first. */}
+          <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(d)} disabled={d.active}
+            title={d.active ? "Turn off to delete" : undefined}
+            aria-label={`Delete ${d.label} (${d.date})`} aria-describedby={d.active ? `del-${d.date}` : undefined}>
+            Delete
+          </button>
+          {d.active && (
+            <span className="visually-hidden" id={`del-${d.date}`}>
               Turn off to delete
             </span>
           )}
@@ -251,17 +233,16 @@ function PlacementDrives() {
           </div>
         </>
       )}
-      <ConfirmDialog
-        open={removing !== null}
-        title="Delete this drive?"
-        confirmLabel="Delete"
-        destructive
-        busy={deleting}
-        onConfirm={() => void confirmDelete()}
-        onCancel={() => setRemoving(null)}
-      >
-        {removing && `${removing.label} (${window_(removing)}) and its ${removing.question_count} questions are removed from the app's database for good. Nobody has opened it, so no results are lost. This can't be undone.`}
-      </ConfirmDialog>
+      {removing && (
+        <DeleteDriveDialog
+          drive={removing}
+          onClose={() => setRemoving(null)}
+          onDeleted={() => {
+            if (resultsDay === removing.date) setResultsDay(null);
+            setRemoving(null);
+          }}
+        />
+      )}
       <ConfirmDialog
         open={toggle !== null}
         title={toggle?.active ? "Turn this drive off?" : "Turn this drive on?"}
@@ -276,5 +257,79 @@ function PlacementDrives() {
           : `${toggle?.label} appears in the app for its audience on ${toggle ? window_(toggle) : ""}${toggle?.has_access_code ? ", after they enter the code" : " (no code is set)"}.`}
       </ConfirmDialog>
     </>
+  );
+}
+
+/** Delete a drive for good, like deleting a course: the server says what goes and what stops it,
+ * and "delete" is typed to confirm. Students' attempts and results go with an opened drive. */
+function DeleteDriveDialog({ drive, onClose, onDeleted }: { drive: DriveSummary; onClose: () => void; onDeleted: () => void }) {
+  const confirmId = useId();
+  const toast = useToast();
+  const client = useQueryClient();
+  const plan = useQuery({ queryKey: [...KEY, "delete-check", drive.date], queryFn: () => fetchDeletePlan(drive.date), retry: false, gcTime: 0 });
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const blocked = !plan.data || plan.data.blockers.length > 0;
+  const opened = plan.data?.opened ?? 0;
+  const close = () => !busy && onClose();
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await deleteDrive(drive.date, opened > 0);
+      toast.success(`${drive.label} (${window_(drive)}) is deleted${opened > 0 ? ", with its results" : ""}.`);
+      await client.invalidateQueries({ queryKey: KEY });
+      onDeleted();
+    } catch (err) {
+      toast.error(err, "The drive couldn't be deleted.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onClose={close} title={`Delete ${drive.label}?`} description="Permanent: the app's database keeps no copy, so nothing can be brought back."
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close} data-initial-focus>Cancel</button>
+          <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={blocked || typed.toLowerCase() !== "delete" || busy}>
+            {busy ? "Deleting…" : "Delete for good"}
+          </button>
+        </>
+      }>
+      {plan.isPending ? (
+        <LoadingBlock rows={3} label="Checking what goes" />
+      ) : plan.error ? (
+        <ErrorState error={plan.error} onRetry={() => void plan.refetch()} />
+      ) : plan.data.blockers.length ? (
+        <Notice tone="warning">
+          <strong>This drive can't be deleted.</strong>
+          <ul style={{ margin: "4px 0 0 16px" }}>{plan.data.blockers.map((b) => <li key={b}>{b}</li>)}</ul>
+        </Notice>
+      ) : (
+        <div className="stack" style={{ gap: 12 }}>
+          <div>
+            <strong>Deleted from the app</strong>
+            <ul style={{ margin: "4px 0 0 16px" }}>
+              <li>The drive {plan.data.label} ({window_(drive)}) and its {plan.data.question_count} question{plan.data.question_count === 1 ? "" : "s"}</li>
+              <li>
+                {opened > 0
+                  ? `${opened} student attempt${opened === 1 ? "" : "s"} (${plan.data.submitted} submitted): their answers, scores and results`
+                  : "No student has opened it, so no results are lost"}
+              </li>
+              <li>Access codes students entered for it</li>
+            </ul>
+          </div>
+          {opened > 0 && (
+            <Notice tone="warning">
+              Download the results first (Results tab, CSV or Excel) if you need them: after this, the results screen and downloads have nothing for this drive.
+            </Notice>
+          )}
+          <div className="field">
+            <label htmlFor={confirmId}>Type <strong>delete</strong> to confirm</label>
+            <input id={confirmId} type="text" value={typed} onChange={(e) => setTyped(e.target.value.trim())} autoComplete="off" spellCheck={false} disabled={busy} />
+          </div>
+        </div>
+      )}
+    </Dialog>
   );
 }

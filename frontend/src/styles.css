@@ -621,10 +621,11 @@ legend {
   border-radius: var(--radius);
   background: var(--surface);
 }
-/* A table box with a fixed most-height: its rows scroll inside, the column headings stay on top. */
+/* A table box with a fixed most-height: its rows scroll inside, the column headings stay on top.
+   Once its rows reach the top or bottom, the wheel goes on to scroll the page (no
+   overscroll-behavior: contain), so the next card can be reached. */
 .table-wrap.table-scroll {
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .table-wrap.table-scroll thead th {
   position: sticky;

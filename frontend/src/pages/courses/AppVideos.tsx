@@ -249,14 +249,14 @@ function CourseView({ course, status }: { course: AppCourse; status: AppVideosSt
       key: "actions",
       header: "Actions",
       render: (l) => (
-        <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
           <button type="button" className="btn btn-sm" onClick={() => setPreview({ key: l.key, title: l.title })} aria-label={`Watch ${l.title}`}>Watch</button>
           <button type="button" className="btn btn-sm" onClick={() => setUpload({ kind: "language", chapter, lecture: l })} disabled={!l.numbered}
             title={l.numbered ? undefined : "The file name has no lecture number, so the app can't match a language copy to it."}
             aria-label={`Add a language to ${l.title}`}>+ Language</button>
           <button type="button" className="btn btn-sm" onClick={() => setUpload({ kind: "replace", chapter, lecture: l })}
             aria-label={`Replace the video of ${l.title}`}>Replace</button>
-          <button type="button" className="btn btn-sm btn-ghost" aria-label={`Delete ${l.title}`}
+          <button type="button" className="btn btn-sm btn-danger" aria-label={`Delete ${l.title}`}
             onClick={() => setRemoval({ key: l.key, whole: true, what: `${chapterName(chapter)}: ${l.title}`,
               detail: `The video${l.languages.length ? `, its ${l.languages.length} language cop${l.languages.length === 1 ? "y" : "ies"}` : ""} and its own image are deleted.` })}>
             Delete

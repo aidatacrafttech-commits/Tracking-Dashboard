@@ -90,21 +90,52 @@ describe("placement drives", () => {
     expect(req.credentials).not.toBe("include");
   });
 
-  it("deletes a drive that is off and never opened, after confirming", async () => {
+  it("deletes a drive that is off and never opened, after typing delete", async () => {
     useApi([DRIVE, { ...DRIVE, date: "2026-11-14", active: true, opened: 7, submitted: 7, locked: true }]);
-    server.use(http.delete(`${A}/drives/:day`, () => new HttpResponse(null, { status: 204 })));
+    server.use(
+      http.get(`${A}/drives/:day/delete-check`, () =>
+        HttpResponse.json({ date: DRIVE.date, open_from: DRIVE.open_from, label: DRIVE.label, question_count: 2, opened: 0, submitted: 0, blockers: [] })),
+      http.delete(`${A}/drives/:day`, () => new HttpResponse(null, { status: 204 })),
+    );
     const user = userEvent.setup();
     renderApp("/placement-drives");
 
     const table = await screen.findByRole("table", { name: "Placement drives" }, { timeout: 5000 });
-    // A drive students have opened has no Delete: its results need it.
-    expect(within(table).queryByRole("button", { name: "Delete Placement Drive (2026-11-14)" })).not.toBeInTheDocument();
+    // A drive that is on can't be deleted: it must be turned off first.
+    expect(within(table).getByRole("button", { name: "Delete Placement Drive (2026-11-14)" })).toBeDisabled();
     await user.click(within(table).getByRole("button", { name: "Delete Placement Drive (2026-12-02)" }));
-    const dialog = await screen.findByRole("dialog", { name: "Delete this drive?" });
-    expect(dialog).toHaveTextContent("can't be undone");
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Placement Drive?" });
+    expect(await within(dialog).findByText(/no results are lost/)).toBeInTheDocument();
+    const go = within(dialog).getByRole("button", { name: "Delete for good" });
+    expect(go).toBeDisabled();
+    await user.type(within(dialog).getByLabelText(/to confirm/), "delete");
+    await user.click(go);
 
     await waitFor(() => expect(called("DELETE", "/drives/2026-12-02")).toHaveLength(1));
+    expect(called("DELETE", "/drives/2026-12-02")[0]!.url.searchParams.get("with_results")).toBeNull();
+  });
+
+  it("deletes an opened drive that is off with its results, after typing delete", async () => {
+    const OPENED = { ...DRIVE, opened: 47, submitted: 47, locked: true };
+    useApi([OPENED]);
+    server.use(
+      http.get(`${A}/drives/:day/delete-check`, () =>
+        HttpResponse.json({ date: DRIVE.date, open_from: DRIVE.open_from, label: DRIVE.label, question_count: 40, opened: 47, submitted: 47, blockers: [] })),
+      http.delete(`${A}/drives/:day`, () => new HttpResponse(null, { status: 204 })),
+    );
+    const user = userEvent.setup();
+    renderApp("/placement-drives");
+
+    const table = await screen.findByRole("table", { name: "Placement drives" }, { timeout: 5000 });
+    await user.click(within(table).getByRole("button", { name: "Delete Placement Drive (2026-12-02)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Placement Drive?" });
+    expect(await within(dialog).findByText(/47 student attempts \(47 submitted\)/)).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Download the results first");
+    await user.type(within(dialog).getByLabelText(/to confirm/), "delete");
+    await user.click(within(dialog).getByRole("button", { name: "Delete for good" }));
+
+    await waitFor(() => expect(called("DELETE", "/drives/2026-12-02")).toHaveLength(1));
+    expect(called("DELETE", "/drives/2026-12-02")[0]!.url.searchParams.get("with_results")).toBe("true");
   });
 
   it("says when the app database is not configured, without asking for drives", async () => {
