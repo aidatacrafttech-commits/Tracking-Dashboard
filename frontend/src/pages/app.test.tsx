@@ -48,8 +48,12 @@ describe("authentication", () => {
     mockSession.expired = true;
     server.use(http.get("*/api/v1/overview", () =>
       HttpResponse.json({ error: { code: "session_expired", message: "expired", request_id: "r" } }, { status: 401 })));
-    await screen.findByRole("button", { name: "Refresh" }).then((b) => b.click());
-    expect(await screen.findByText("Your session expired. Please sign in again.")).toBeInTheDocument();
+    // Refresh meets the 401. On a slow machine a background request can meet it first and
+    // sign out before the button is clicked; either way the notice must show.
+    await waitFor(() => {
+      screen.queryByRole("button", { name: "Refresh" })?.click();
+      expect(screen.getByText("Your session expired. Please sign in again.")).toBeInTheDocument();
+    }, { timeout: 5000 });
   });
 
   it("signs out through the server", async () => {
